@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -84,6 +85,17 @@ input:focus,select:focus,textarea:focus{border-color:var(--cyan);box-shadow:0 0 
  .header{padding:14px;gap:12px} .logo{width:68px;height:68px;min-width:68px} h1{font-size:1.08rem}
  .section{padding:16px} .title h2{font-size:1.6rem}
 }
+
+.history-wrap{margin-top:20px}
+.history-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.new-doubt-btn{width:auto;padding:10px 14px;font-size:.82rem;animation:none;background:linear-gradient(135deg,#0ea5e9,#6366f1)}
+.doubt-card{padding:18px;margin-top:12px}
+.doubt-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.doubt-meta{color:var(--muted);font-size:.8rem;margin-top:3px}
+.doubt-photo,.solution-photo{width:100%;max-height:420px;object-fit:contain;background:#02040a;border-radius:12px;border:1px solid var(--border);margin-top:10px}
+.doubt-label{color:var(--dim);font-size:.7rem;margin-top:12px;text-transform:uppercase;letter-spacing:.05em}
+.empty-history{text-align:center;color:var(--dim);font-size:.8rem;padding:18px;border:1px dashed var(--border);border-radius:12px}
+
 </style>
 </head>
 <body>
@@ -125,105 +137,207 @@ input:focus,select:focus,textarea:focus{border-color:var(--cyan);box-shadow:0 0 
 <div class="note">* Student Name, Roll No, Subject અને Photo required છે.</div>
 </form>
 
-<section class="card status" id="status">
-<h3>📚 My Doubt</h3>
-<div id="statusBadge" class="badge pending">Pending</div>
-<div id="studentInfo" class="details"></div>
-<div id="studentDetails" class="details"></div>
-<div class="live">🔴 Live Update Enabled — Teacher solution આવશે ત્યારે automatically દેખાશે.</div>
-<div class="solution" id="solution">
-<h3 style="margin:12px 0 7px">✅ Teacher Solution</h3>
-<div id="solutionDetails" class="details"></div>
-<img id="solutionImg" alt="Teacher Solution">
+<section class="history-wrap" id="historyWrap">
+<div class="history-head">
+<h3>📚 My Doubts</h3>
+<button type="button" class="btn new-doubt-btn" id="newDoubtBtn">+ Ask New Doubt</button>
 </div>
+<div id="doubtsList"><div class="empty-history">હજુ કોઈ doubt history નથી.</div></div>
 </section>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
 <script>
 const SUPABASE_URL='https://qaueczwungesulwujmch.supabase.co';
 const SUPABASE_KEY='sb_publishable_1R9DPCZZH3yjw2L6R5geuQ_OzF4EoZe';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 const $=id=>document.getElementById(id);
-let currentId=null,channel=null;
 
-$('photo').addEventListener('change',()=>{const f=$('photo').files[0];if(f)showPreview(f)});
+let studentName=localStorage.getItem('gci_student_name')||'';
+let studentRoll=localStorage.getItem('gci_student_roll')||'';
+let channel=null;
 
-function showPreview(f){
- if(!f.type.startsWith('image/')){alert('ફક્ત image file પસંદ કરો.');$('photo').value='';return}
- if(f.size>5*1024*1024){alert('Photo 5MBથી ઓછી હોવી જોઈએ.');$('photo').value='';return}
- const r=new FileReader();
- r.onload=e=>{$('previewImg').src=e.target.result;$('fileText').textContent='✓ '+f.name;$('preview').classList.add('show')};
- r.readAsDataURL(f);
-}
+if(studentName) $('name').value=studentName;
+if(studentRoll) $('roll').value=studentRoll;
 
-$('form').addEventListener('submit',async e=>{
- e.preventDefault();
- const name=$('name').value.trim(),roll=$('roll').value.trim(),subject=$('subject').value,details=$('details').value.trim(),photo=$('photo').files[0];
- if(!name||!roll||!subject||!photo)return alert('Required fields complete કરો.');
- if(photo.size>5*1024*1024)return alert('Photo 5MBથી ઓછી હોવી જોઈએ.');
-
- $('submit').disabled=true;$('submit').textContent='Uploading...';
- try{
-   const safe=photo.name.replace(/[^a-zA-Z0-9._-]/g,'_');
-   const uid=(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));
-   const path=`doubts/${Date.now()}_${uid}_${safe}`;
-   let {error}=await sb.storage.from('gci-doubts').upload(path,photo,{cacheControl:'3600',upsert:false,contentType:photo.type});
-   if(error)throw error;
-
-   const {data:u}=sb.storage.from('gci-doubts').getPublicUrl(path);
-   const ins=await sb.from('gci-mehsana').insert([{student_name:name,roll_number:roll,subject,doubt_photo:u.publicUrl,details:details||null,solution_photo:null,solution_details:null,status:'Pending'}]).select('id,student_name,roll_number,subject,details,solution_photo,solution_details,status').single();
-   if(ins.error)throw ins.error;
-
-   currentId=ins.data.id;
-   localStorage.setItem('gci_last_doubt_id',String(currentId));
-   showStatus(ins.data);
-   $('form').style.display='none';
-   listen();
- }catch(err){
-   alert('Doubt submit failed:\n'+(err.message||err));
-   $('submit').disabled=false;
-   $('submit').textContent='Doubt Submit કરો';
- }
+$('photo').addEventListener('change',()=>{
+  const f=$('photo').files[0];
+  if(f) showPreview(f);
 });
 
-function showStatus(d){
- $('status').classList.add('show');
- $('studentInfo').textContent=`${d.student_name} • Roll No: ${d.roll_number} • ${d.subject}`;
- $('studentDetails').textContent=d.details?'Your details: '+d.details:'';
- const solved=String(d.status||'').toLowerCase()==='solved';
- $('statusBadge').textContent=solved?'✓ SOLVED':'⏳ PENDING';
- $('statusBadge').className='badge '+(solved?'solved':'pending');
- if(d.solution_photo||d.solution_details){
-   $('solution').classList.add('show');
-   $('solutionImg').style.display=d.solution_photo?'block':'none';
-   if(d.solution_photo)$('solutionImg').src=d.solution_photo;
-   $('solutionDetails').textContent=d.solution_details?'Teacher description: '+d.solution_details:'';
- }else{
-   $('solution').classList.remove('show');
- }
+function showPreview(f){
+  if(!f.type.startsWith('image/')){
+    alert('ફક્ત image file પસંદ કરો.');
+    $('photo').value='';
+    return;
+  }
+  if(f.size>5*1024*1024){
+    alert('Photo 5MBથી ઓછી હોવી જોઈએ.');
+    $('photo').value='';
+    return;
+  }
+  const r=new FileReader();
+  r.onload=e=>{
+    $('previewImg').src=e.target.result;
+    $('fileText').textContent='✓ '+f.name;
+    $('preview').classList.add('show');
+  };
+  r.readAsDataURL(f);
 }
 
-async function listen(){
- if(!currentId)return;
- if(channel)await sb.removeChannel(channel);
- channel=sb.channel('student-doubt-'+currentId)
- .on('postgres_changes',{event:'UPDATE',schema:'public',table:'gci-mehsana',filter:`id=eq.${currentId}`},payload=>showStatus(payload.new))
- .subscribe();
+function esc(s=''){
+  return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'","&#39;");
 }
 
-async function restoreLastDoubt(){
- const id=localStorage.getItem('gci_last_doubt_id');
- if(!id)return;
- const {data,error}=await sb.from('gci-mehsana').select('id,student_name,roll_number,subject,details,solution_photo,solution_details,status').eq('id',id).maybeSingle();
- if(!error&&data){
-   currentId=data.id;
-   $('form').style.display='none';
-   showStatus(data);
-   listen();
- }
+function clearDoubtFields(){
+  $('subject').value='';
+  $('details').value='';
+  $('photo').value='';
+  $('preview').classList.remove('show');
+  $('previewImg').removeAttribute('src');
+  $('fileText').textContent='';
 }
-restoreLastDoubt();
+
+$('newDoubtBtn').addEventListener('click',()=>{
+  clearDoubtFields();
+  $('form').scrollIntoView({behavior:'smooth',block:'start'});
+});
+
+$('form').addEventListener('submit',async e=>{
+  e.preventDefault();
+
+  const name=$('name').value.trim();
+  const roll=$('roll').value.trim();
+  const subject=$('subject').value;
+  const details=$('details').value.trim();
+  const photo=$('photo').files[0];
+
+  if(!name||!roll||!subject||!photo) return alert('Required fields complete કરો.');
+  if(photo.size>5*1024*1024) return alert('Photo 5MBથી ઓછી હોવી જોઈએ.');
+
+  $('submit').disabled=true;
+  $('submit').textContent='Uploading...';
+
+  try{
+    const safe=photo.name.replace(/[^a-zA-Z0-9._-]/g,'_');
+    const uid=(crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).slice(2));
+    const path=`doubts/${Date.now()}_${uid}_${safe}`;
+
+    const {error:uploadError}=await sb.storage.from('gci-doubts').upload(path,photo,{
+      cacheControl:'3600',upsert:false,contentType:photo.type
+    });
+    if(uploadError) throw uploadError;
+
+    const {data:u}=sb.storage.from('gci-doubts').getPublicUrl(path);
+
+    const ins=await sb.from('gci-mehsana').insert([{
+      student_name:name,
+      roll_number:roll,
+      subject,
+      doubt_photo:u.publicUrl,
+      details:details||null,
+      solution_photo:null,
+      solution_details:null,
+      status:'Pending'
+    }]).select('id,student_name,roll_number,subject,doubt_photo,details,solution_photo,solution_details,status,created_at').single();
+
+    if(ins.error) throw ins.error;
+
+    studentName=name;
+    studentRoll=roll;
+    localStorage.setItem('gci_student_name',name);
+    localStorage.setItem('gci_student_roll',roll);
+
+    clearDoubtFields();
+    $('submit').disabled=false;
+    $('submit').textContent='Doubt Submit કરો';
+
+    await loadMyDoubts();
+    await listenToMyDoubts();
+
+    alert('Doubt successfully submitted ✅\nતમે હવે બીજો doubt પણ submit કરી શકો છો.');
+    $('historyWrap').scrollIntoView({behavior:'smooth',block:'start'});
+
+  }catch(err){
+    alert('Doubt submit failed:\n'+(err.message||err));
+    $('submit').disabled=false;
+    $('submit').textContent='Doubt Submit કરો';
+  }
+});
+
+async function loadMyDoubts(){
+  if(!studentRoll){
+    $('doubtsList').innerHTML='<div class="empty-history">હજુ કોઈ doubt history નથી.</div>';
+    return;
+  }
+
+  const {data,error}=await sb.from('gci-mehsana')
+    .select('id,student_name,roll_number,subject,doubt_photo,details,solution_photo,solution_details,status,created_at')
+    .eq('roll_number',studentRoll)
+    .order('created_at',{ascending:false});
+
+  if(error){
+    $('doubtsList').innerHTML='<div class="empty-history">Doubt history load failed.</div>';
+    return;
+  }
+
+  const rows=(data||[]).filter(d=>!studentName || String(d.student_name||'').trim().toLowerCase()===studentName.trim().toLowerCase());
+
+  if(!rows.length){
+    $('doubtsList').innerHTML='<div class="empty-history">હજુ કોઈ doubt history નથી.</div>';
+    return;
+  }
+
+  $('doubtsList').innerHTML=rows.map(d=>{
+    const solved=String(d.status||'').toLowerCase()==='solved';
+    const when=d.created_at?new Date(d.created_at).toLocaleString():'';
+    return `
+      <article class="card doubt-card">
+        <div class="doubt-top">
+          <div>
+            <h3>${esc(d.subject||'Doubt')}</h3>
+            <div class="doubt-meta">${esc(d.student_name||'')} • Roll No: ${esc(d.roll_number||'')}${when?' • '+esc(when):''}</div>
+          </div>
+          <span class="badge ${solved?'solved':'pending'}">${solved?'✓ SOLVED':'⏳ PENDING'}</span>
+        </div>
+
+        ${d.details?`<div class="doubt-label">Your Details</div><div class="details">${esc(d.details)}</div>`:''}
+        ${d.doubt_photo?`<div class="doubt-label">Your Doubt</div><img class="doubt-photo" src="${esc(d.doubt_photo)}" alt="Student Doubt">`:''}
+
+        <div class="live">${solved?'✅ Teacher solution received':'🔴 Live Update Enabled — Teacher solution આવશે ત્યારે automatically દેખાશે.'}</div>
+
+        ${(d.solution_photo||d.solution_details)?`
+          <div class="doubt-label">Teacher Solution</div>
+          ${d.solution_details?`<div class="details">${esc(d.solution_details)}</div>`:''}
+          ${d.solution_photo?`<img class="solution-photo" src="${esc(d.solution_photo)}" alt="Teacher Solution">`:''}
+        `:''}
+      </article>`;
+  }).join('');
+}
+
+async function listenToMyDoubts(){
+  if(!studentRoll) return;
+  if(channel) await sb.removeChannel(channel);
+
+  channel=sb.channel('student-doubts-'+studentRoll)
+    .on('postgres_changes',{
+      event:'*',
+      schema:'public',
+      table:'gci-mehsana',
+      filter:`roll_number=eq.${studentRoll}`
+    },()=>loadMyDoubts())
+    .subscribe();
+}
+
+async function init(){
+  if(studentRoll){
+    await loadMyDoubts();
+    await listenToMyDoubts();
+  }
+}
+init();
 </script>
+
 </body>
 </html>
